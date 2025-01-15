@@ -1,0 +1,73 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: projettechno-
+spec:
+  entrypoint: main
+  templates:
+  - name: main
+    dag:
+      tasks:
+      - name: airbyte-sync
+        template: airbyte-job
+      - name: dbt-transform
+        template: dbt-job
+        dependencies: [airbyte-sync]
+      - name: elasticsearch-index
+        template: elasticsearch-job
+        dependencies: [dbt-transform]
+      - name: postgresql-job
+        template: postgres-job
+        dependencies: [dbt-transform]
+      - name: superset-visualization
+        template: superset-job
+        dependencies: [postgresql-job, elasticsearch-index]
+
+  - name: airbyte-job
+    container:
+      image: curlimages/curl
+      command: [sh, -c]
+      args: [
+        'curl -X POST "http://10.85.230.223:8000/api/v1/syncs/start" -H "Content-Type: application/json" -d ''{"connectionId": "72ff8d64-3310-4ef4-ac86-76507d1cfe4d"}'''
+      ]
+
+  - name: dbt-job
+    container:
+      image: fishtownanalytics/dbt
+      command: ["dbt", "run"]
+      env:
+        - name: DBT_HOST
+          value: "10.85.230.223"
+        - name: DBT_USER
+          value: "postgres"
+        - name: DBT_PASSWORD
+          value: "123456789"
+        - name: DBT_DATABASE
+          value: "bigdata_pipeline"
+
+  - name: elasticsearch-job
+    container:
+      image: curlimages/curl
+      command: [sh, -c]
+      args: [
+        'curl -X POST "http://10.85.231.14:9200/hr/_doc/" -H "Content-Type: application/json" -d ''{"field1": "value1", "field2": "value2"}'''
+      ]
+
+  - name: postgres-job
+    container:
+      image: postgres:latest
+      command: ["psql"]
+      args: [
+        "-h", "10.85.230.223", 
+        "-U", "postgres", 
+        "-d", "bigdata_pipeline", 
+        "-c", "SELECT 1;"
+      ]
+
+  - name: superset-job
+    container:
+      image: curlimages/curl
+      command: [sh, -c]
+      args: [
+        'curl -X POST "http://10.85.231.31:8088/api/v1/dashboard" -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6dHJ1ZSwiaWF0IjoxNzM2ODg0ODk4LCJqdGkiOiJlNjE5MTNjNy00Y2RkLTQzZTItOTFmZC02NzY0MjZlZTlmOGQiLCJ0eXBlIjoiYWNjZXNzIiwic3ViIjoyLCJuYmYiOjE3MzY4ODQ4OTgsImNzcmYiOiJiM2I3M2FmOS1kYTM2LTRkY2EtYTdhYi0xMjhjNjJiMWYyMDQiLCJleHAiOjE3MzY4ODU3OTh9.6SJYwJpxDyPKgqjevkSoMr_nIyTaq2_OZ7_y_erGWL0" -H "Content-Type: application/json" -d ''{"dashboard_id": 2}'''
+      ]
